@@ -28,7 +28,7 @@ function checkFlights() {
     return_date: "2026-06-28",
     currency: "HKD",
     gl: "hk",           // 強制指定地區為香港
-    hl: "zh-hk",        // 強制指定語言為繁體中文
+    hl: "zh-tw",        // 強制指定語言為繁體中文
     api_key: API_KEY
   }, (json) => {
     // 1. 合併所有回傳嘅航班組合
@@ -70,5 +70,6 @@ function checkFlights() {
 }
 checkFlights();
 setInterval(checkFlights, 8 * 60 * 60 * 1000); // 8 小時 Check 一次
+
 
 
