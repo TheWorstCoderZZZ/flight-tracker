@@ -18,7 +18,7 @@ const BUDGET = parseInt(process.env.FLIGHT_BUDGET) || 1100;
 
 function checkFlights() {
   const now = new Date().toLocaleString("zh-HK", {timeZone: "Asia/Hong_Kong"});
-  console.log(`[${now}] 正在檢查 UO598/UO597 航班...`);
+  console.log(`[${now}] 正在掃描 UO 航班 (HKG <-> PQC)...`);
 
   getJson({
     engine: "google_flights",
@@ -27,35 +27,48 @@ function checkFlights() {
     outbound_date: "2026-06-21",
     return_date: "2026-06-28",
     currency: "HKD",
+    gl: "hk",           // 強制指定地區為香港
+    hl: "zh-hk",        // 強制指定語言為繁體中文
     api_key: API_KEY
   }, (json) => {
-    // 1. 結合 best_flights 同其他 flights 搵出最齊嘅數據
-    const allItineraries = [...(json.best_flights || []), ...(json.other_flights || [])];
+    // 1. 合併所有回傳嘅航班組合
+    const allOptions = [
+      ...(json.best_flights || []),
+      ...(json.other_flights || [])
+    ];
 
-    // 2. 篩選出同時符合 UO598 同 UO597 嘅組合
-    const targetFlight = allItineraries.find(itinerary => {
+    if (allOptions.length === 0) {
+      console.log("❌ API 無回傳任何航班數據。");
+      return;
+    }
+
+    // 2. 搵出包含 UO 598 同 UO 597 嘅組合
+    const myFlight = allOptions.find(itinerary => {
       const flights = itinerary.flights;
-      // 確保呢個組合入面有呢兩個航班編號
-      const hasOutbound = flights.some(f => f.flight_number === "UO598");
-      const hasReturn = flights.some(f => f.flight_number === "UO597");
-      return hasOutbound && hasReturn;
+      // 只要航班編號包含 598 同 597 就算中
+      const has598 = flights.some(f => f.flight_number.includes("598"));
+      const has597 = flights.some(f => f.flight_number.includes("597"));
+      return has598 && has597;
     });
 
-    if (targetFlight) {
-      const price = targetFlight.price;
-      console.log(`✅ 搵到目標航班！UO598/UO597 現價: HKD ${price}`);
+    if (myFlight) {
+      const currentPrice = myFlight.price;
+      console.log(`🎯 搵到喇！UO598/597 來回票價: HKD ${currentPrice}`);
 
-      if (price <= BUDGET) {
-        sendPushNotification(price);
+      if (currentPrice <= BUDGET) {
+        console.log(`🔥 價錢跌破預算 ($${BUDGET})！發送推送通知...`);
+        sendPushNotification(currentPrice);
       } else {
-        console.log(`❌ 價格 ${price} 仲未跌到預算 ${BUDGET}。`);
+        console.log(`💡 目前價格 $${currentPrice} 仲係貴過預算 $${BUDGET}。`);
       }
     } else {
-      console.log("⚠️ 暫時搵唔到 UO598/UO597 嘅直航組合，可能已售罄或日期有誤。");
+      console.log("⚠️ 喺搜尋結果入面搵唔到 UO598 + UO597 嘅組合。");
+      // 印出第一班機嘅名嚟 debug
+      if (allOptions[0]) console.log(`搜尋結果首選係: ${allOptions[0].flights[0].airline}`);
     }
   });
 }
-
 checkFlights();
 setInterval(checkFlights, 8 * 60 * 60 * 1000); // 8 小時 Check 一次
+
 
