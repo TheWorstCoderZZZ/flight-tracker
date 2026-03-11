@@ -17,7 +17,9 @@ const NTFY_TOPIC = process.env.NTFY_TOPIC;
 const BUDGET = parseInt(process.env.FLIGHT_BUDGET) || 1100;
 
 function checkFlights() {
-  console.log(`[${new Date().toLocaleString()}] 檢查中...`);
+  const now = new Date().toLocaleString("zh-HK", {timeZone: "Asia/Hong_Kong"});
+  console.log(`[${now}] 正在檢查 UO598/UO597 航班...`);
+
   getJson({
     engine: "google_flights",
     departure_id: "HKG",
@@ -27,17 +29,33 @@ function checkFlights() {
     currency: "HKD",
     api_key: API_KEY
   }, (json) => {
-    if (json.best_flights && json.best_flights.length > 0) {
-      const price = json.best_flights[0].price;
-      console.log(`目前價格: HKD ${price}`);
+    // 1. 結合 best_flights 同其他 flights 搵出最齊嘅數據
+    const allItineraries = [...(json.best_flights || []), ...(json.other_flights || [])];
+
+    // 2. 篩選出同時符合 UO598 同 UO597 嘅組合
+    const targetFlight = allItineraries.find(itinerary => {
+      const flights = itinerary.flights;
+      // 確保呢個組合入面有呢兩個航班編號
+      const hasOutbound = flights.some(f => f.flight_number === "UO598");
+      const hasReturn = flights.some(f => f.flight_number === "UO597");
+      return hasOutbound && hasReturn;
+    });
+
+    if (targetFlight) {
+      const price = targetFlight.price;
+      console.log(`✅ 搵到目標航班！UO598/UO597 現價: HKD ${price}`);
+
       if (price <= BUDGET) {
-        axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, `✈️ 富國島平飛！現價 HKD ${price}`, {
-          headers: { 'Title': 'Flight Price Alert', 'Priority': 'high', 'Tags': 'airplane' }
-        });
+        sendPushNotification(price);
+      } else {
+        console.log(`❌ 價格 ${price} 仲未跌到預算 ${BUDGET}。`);
       }
+    } else {
+      console.log("⚠️ 暫時搵唔到 UO598/UO597 嘅直航組合，可能已售罄或日期有誤。");
     }
   });
 }
 
 checkFlights();
 setInterval(checkFlights, 8 * 60 * 60 * 1000); // 8 小時 Check 一次
+
