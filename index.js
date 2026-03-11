@@ -2,23 +2,46 @@ const { getJson } = require("serpapi");
 const axios = require("axios");
 const express = require('express');
 
+// 1. Web Server 設定 (等 Render 免費版可以 24 小時運作)
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Web Server 讓 Render 保持運行
 app.get('/', (req, res) => {
-  res.send('<h1>機票監控機器人運行中！✈️</h1>');
+  res.send('<h1>UO 富國島監控機器人運行中！✈️</h1><p>目前正在雲端 24/7 幫你吼住 UO598 同 UO597。</p>');
 });
-app.listen(port, () => console.log(`Server running on port ${port}`));
 
-// 從 Environment Variables 讀取設定
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
+
+// 2. 從 Render 的 Environment Variables 讀取設定
 const API_KEY = process.env.SERPAPI_KEY;
 const NTFY_TOPIC = process.env.NTFY_TOPIC;
-const BUDGET = parseInt(process.env.FLIGHT_BUDGET) || 1100;
+const BUDGET = parseInt(process.env.FLIGHT_BUDGET) || 3000;
 
+// 3. 手機推送函數 (使用 ntfy.sh)
+async function sendPushNotification(price) {
+  try {
+    await axios.post(`https://ntfy.sh/${NTFY_TOPIC}`, 
+      `✈️ UO 富國島平機票！現價 HKD ${price}`, 
+      {
+        headers: {
+          'Title': 'Flight Price Alert',
+          'Priority': 'high',
+          'Tags': 'airplane,moneybag'
+        }
+      }
+    );
+    console.log("📱 手機推送已發送！");
+  } catch (err) {
+    console.error("推送失敗:", err.message);
+  }
+}
+
+// 4. 核心監控邏輯 (針對 UO 598/597 直航)
 function checkFlights() {
   const now = new Date().toLocaleString("zh-HK", {timeZone: "Asia/Hong_Kong"});
-  console.log(`[${now}] 正在掃描 UO 航班 (HKG <-> PQC)...`);
+  console.log(`[${now}] 正在深度掃描 UO 直航航班 (HKG <-> PQC)...`);
 
   getJson({
     engine: "google_flights",
@@ -27,49 +50,49 @@ function checkFlights() {
     outbound_date: "2026-06-21",
     return_date: "2026-06-28",
     currency: "HKD",
-    gl: "hk",           // 強制指定地區為香港
-    hl: "zh-tw",        // 強制指定語言為繁體中文
+    gl: "hk",
+    hl: "zh-tw", // 修正後的語言代碼，確保 API 唔會報錯
     api_key: API_KEY
   }, (json) => {
-    // 1. 合併所有回傳嘅航班組合
+    // 合併所有搜尋結果 (包含 'Best' 同 'Other')
     const allOptions = [
       ...(json.best_flights || []),
       ...(json.other_flights || [])
     ];
 
     if (allOptions.length === 0) {
-      console.log("❌ API 無回傳任何航班數據。");
+      console.log("❌ API 暫時沒有回傳任何航班數據。");
       return;
     }
 
-    // 2. 搵出包含 UO 598 同 UO 597 嘅組合
+    // 篩選：香港快運 (UO) 的直航組合 (去程+回程 = 2 段)
     const myFlight = allOptions.find(itinerary => {
       const flights = itinerary.flights;
-      // 只要航班編號包含 598 同 597 就算中
-      const has598 = flights.some(f => f.flight_number.includes("598"));
-      const has597 = flights.some(f => f.flight_number.includes("597"));
-      return has598 && has597;
+      const isUO = flights.every(f => f.airline === "Hong Kong Express");
+      const isDirect = flights.length === 2; 
+      return isUO && isDirect;
     });
 
     if (myFlight) {
       const currentPrice = myFlight.price;
-      console.log(`🎯 搵到喇！UO598/597 來回票價: HKD ${currentPrice}`);
+      const flightDetails = myFlight.flights.map(f => `${f.flight_number}`).join(' & ');
+      console.log(`🎯 成功鎖定 UO 直航！航班: ${flightDetails} | 票價: HKD ${currentPrice}`);
 
       if (currentPrice <= BUDGET) {
-        console.log(`🔥 價錢跌破預算 ($${BUDGET})！發送推送通知...`);
+        console.log(`🔥 價格 $${currentPrice} 低於預算 $${BUDGET}！發送通知...`);
         sendPushNotification(currentPrice);
       } else {
-        console.log(`💡 目前價格 $${currentPrice} 仲係貴過預算 $${BUDGET}。`);
+        console.log(`💡 目前價格 $${currentPrice} 仍高於預算 $${BUDGET}。`);
       }
     } else {
-      console.log("⚠️ 喺搜尋結果入面搵唔到 UO598 + UO597 嘅組合。");
-      // 印出第一班機嘅名嚟 debug
-      if (allOptions[0]) console.log(`搜尋結果首選係: ${allOptions[0].flights[0].airline}`);
+      console.log("⚠️ 搜尋結果中找不到 UO 直航組合。");
+      if (allOptions[0]) {
+        console.log(`Debug - 搜尋首選是: ${allOptions[0].flights[0].airline} ($${allOptions[0].price})`);
+      }
     }
   });
 }
-checkFlights();
-setInterval(checkFlights, 8 * 60 * 60 * 1000); // 8 小時 Check 一次
 
-
-
+// 5. 啟動計時器
+checkFlights(); // 啟動時先執行一次
+setInterval(checkFlights, 8 * 60 * 60 * 1000); // 之後每 8 小時檢查一次 (符合免費額度)
